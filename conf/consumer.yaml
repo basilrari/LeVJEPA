@@ -1,0 +1,157 @@
+# Consumer Walking Tours recipe, one GPU.
+#
+# Paper (arXiv:2608.27395, "Pretraining on consumer hardware"): ViT-Tiny, batch
+# 128, eight Walking Tours videos, ~5M clips, ~12h on an RTX 5080, frozen
+# ImageNet 8.9% -> 25.2%. This file keeps that model and batch. The data is
+# the repo's full 10-video Walking Tours store (the paper does not name which
+# eight). Clip budget is 39063 optimizer steps * 128 = 5,000,064 clips.
+#
+# Everything else is the published Walking Tours config (conf/config.yaml):
+# 16-frame clips, stride 2, tubelet 1, 95% random token drop, block-causal
+# attention, 10 local crops, SIGReg weight 0.02, lr 4e-4 flat after warmup.
+# Warmup is 12% of the step budget (the config.yaml note says to scale
+# peak_step with run length). LR is NOT scaled down from the batch-3072
+# recipe; the consumer paragraph does not publish a separate LR.
+#
+# Launch (Blackwell is GPU 0 on this machine):
+#   bash scripts/train_consumer.sh
+# DISReg (off by default):
+#   bash scripts/train_consumer.sh disreg.enabled=true run_name=disreg
+
+defaults:
+  - data: walking_tours
+  - _self_
+
+run_name: baseline
+seed: 0
+csv_log: true
+
+frame_stride: 2
+accumulate_grad_batches: 1
+
+loader:
+  batch_size: 128
+  num_workers: 8
+  persistent_workers: true
+  prefetch_factor: 2
+  pin_memory: true
+  clips_per_video: 200
+  normalize_on_gpu: true
+
+augmentation:
+  local_size: 96
+  local_crops_number: 10
+  local_crops_scale: [0.02, 0.4]
+  global_crops_scale: [0.8, 1.0]
+  hflip: true
+  color_jitter_prob: 0.8
+  grayscale_prob: 0.2
+  gaussian_blur_prob: 0.0
+  color_jitter_hue: 0.1
+
+model:
+  name: vit_tiny
+  img_size: 224
+  patch_size: 16
+  num_frames: 16
+  tubelet_size: 1
+  use_rope: true
+  token_drop_rate: 0.95
+  attn_mode: block_causal
+
+projector:
+  hidden_dim: 2048
+  output_dim: 256
+
+optimizer:
+  type: AdamW
+  lr: 4.0e-4
+  weight_decay: 0.04
+  exclude_bias_norm: true
+  betas: [0.9, 0.95]
+
+scheduler:
+  name: LinearWarmupCosineAnnealing
+  interval: step
+  peak_step: 4688
+  start_lr: 1.0e-4
+  end_lr: 4.0e-4
+
+weight_decay_scheduler:
+  enabled: false
+  schedule_type: cosine
+  start_value: 0.04
+  end_value: 0.4
+  param_group_indices: [0]
+
+ema:
+  enabled: true
+  decay: 0.9999
+  update_every: 32
+  start_step: 0
+  include: ["encoder"]
+  exclude: []
+  save_key: state_dict_ema
+  device: cuda
+  dtype: float32
+
+loss:
+  sigreg:
+    weight: 0.02
+    kwargs:
+      knots: 17
+      num_proj: 1024
+      normalize_by_n: false
+
+# MotionJEPA released defaults (configs/*_motionjepa_default.yaml):
+#   sigreg_weight=0.25 on z, diff_pred_weight=0.5, diff_sigreg_weight=2.0.
+# lambda_disreg is an outer multiplier so those weights apply unchanged at 1.0.
+# LeVJEPA's own SIGReg (loss.sigreg.weight=0.02 on the clip CLS) stays on.
+disreg:
+  enabled: false
+  gap: clip          # clip = first and last frame; 1 = first two clip frames
+  share_encoder: false
+  lambda_disreg: 1.0
+  lambda_z: 0.25
+  lambda_pred: 0.5
+  lambda_sigreg_d: 2.0
+
+wandb:
+  enabled: false
+  config:
+    project: le-vjepa
+    name: lejepa_vittiny_walking_tours
+    log_model: false
+
+checkpoint:
+  dirpath: checkpoints
+  filename: step-{step:06d}
+  every_n_epochs: 0
+  every_n_train_steps: 2000
+  save_top_k: -1
+  save_last: true
+  auto_insert_metric_name: false
+
+resume:
+  ckpt_path: null
+  weights_only: false
+
+trainer:
+  max_epochs: 100000
+  max_steps: 39063
+  accelerator: gpu
+  devices: 1
+  num_nodes: 1
+  strategy: auto
+  precision: bf16-mixed
+  num_sanity_val_steps: 0
+  limit_train_batches: 1.0
+  limit_val_batches: 0
+  log_every_n_steps: 10
+  enable_checkpointing: true
+
+hydra:
+  job:
+    chdir: true
+  run:
+    dir: runs/${run_name}/${now:%Y-%m-%d_%H-%M-%S}

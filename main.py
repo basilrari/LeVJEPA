@@ -1,17 +1,22 @@
+import json
+from pathlib import Path
+
 import hydra
 import lightning as pl
 import stable_pretraining as spt
 import stable_pretraining.optim.utils as spt_optim_utils
 import torch
 from einops import rearrange
+from hydra.core.hydra_config import HydraConfig
 from hydra.utils import to_absolute_path
 from lightning.pytorch.callbacks import ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from callbacks import WeightDecayUpdater, WeightEMA
 import module as vit_models
 from data.loader import build_loader
+from disreg import build_disreg
 from module import SIGReg
 
 torch.set_float32_matmul_precision("high")
@@ -131,22 +136,79 @@ def multiview_forward(self, batch, stage):
     output["pred_loss"] = (global_emb - embeddings).pow(2).mean()
     output["sigreg_loss"] = self.sigreg(rearrange(embeddings, "b v d -> v b d"))
     output["loss"] = output["pred_loss"] + self.sigreg_weight * output["sigreg_loss"]
-    self.log_dict(
-        {
-            f"{stage}/pred_loss": output["pred_loss"].detach(),
-            f"{stage}/sigreg_loss": output["sigreg_loss"].detach(),
-            f"{stage}/loss": output["loss"].detach(),
-        },
-        on_step=True,
-        on_epoch=True,
-        sync_dist=True,
-    )
-
+    logs = {
+        f"{stage}/pred_loss": output["pred_loss"].detach(),
+        f"{stage}/sigreg_loss": output["sigreg_loss"].detach(),
+        f"{stage}/cls_std": embeddings.detach().std(),
+    }
+    # DISReg is training-only. Eval / the ImageNet probe never call it.
+    if self.training and getattr(self, "disreg_enabled", False):
+        disreg_total, parts = self.disreg.training_loss(
+            self.encoder, self.sigreg, batch["global_frame"]
+        )
+        output["loss"] = output["loss"] + disreg_total
+        output["inv"] = output["pred_loss"]
+        output["disreg_pred"] = parts["disreg_pred"]
+        output["sigreg_z"] = parts["sigreg_z"]
+        output["sigreg_d"] = parts["sigreg_d"]
+        output["disreg"] = parts["disreg"]
+        logs[f"{stage}/inv"] = output["inv"].detach()
+        logs[f"{stage}/disreg_pred"] = parts["disreg_pred"].detach()
+        logs[f"{stage}/sigreg_z"] = parts["sigreg_z"].detach()
+        logs[f"{stage}/sigreg_d"] = parts["sigreg_d"].detach()
+        logs[f"{stage}/disreg"] = parts["disreg"].detach()
+        logs[f"{stage}/z_std"] = parts["z_std"]
+        logs[f"{stage}/d_std"] = parts["d_std"]
+        if not torch.isfinite(output["loss"]):
+            raise FloatingPointError(
+                "non-finite loss (inv="
+                f"{float(output['pred_loss'].detach())} sigreg_cls="
+                f"{float(output['sigreg_loss'].detach())} disreg_pred="
+                f"{float(parts['disreg_pred'].detach())} sigreg_z="
+                f"{float(parts['sigreg_z'].detach())} sigreg_d="
+                f"{float(parts['sigreg_d'].detach())}). "
+                "Halve disreg.lambda_disreg and resume from the last checkpoint."
+            )
+    logs[f"{stage}/loss"] = output["loss"].detach()
+    self.log_dict(logs, on_step=True, on_epoch=True, sync_dist=True)
     return output
+
+
+class RunManifest(pl.Callback):
+    """Write GPU, step, and peak memory into the Hydra run directory."""
+
+    def __init__(self, out_dir: str):
+        super().__init__()
+        self.out_dir = out_dir
+
+    def _write(self, trainer: pl.Trainer) -> None:
+        if not trainer.is_global_zero:
+            return
+        payload = {
+            "global_step": int(trainer.global_step),
+            "max_steps": int(getattr(trainer, "max_steps", -1) or -1),
+        }
+        if torch.cuda.is_available():
+            payload["gpu"] = torch.cuda.get_device_name(0)
+            payload["peak_vram_mib"] = round(
+                torch.cuda.max_memory_allocated() / (1024**2), 1
+            )
+        path = Path(self.out_dir) / "run_manifest.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if trainer.global_step and trainer.global_step % 200 == 0:
+            self._write(trainer)
+
+    def on_train_end(self, trainer, pl_module):
+        self._write(trainer)
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig):
+    if cfg.get("seed") is not None:
+        pl.seed_everything(int(cfg.seed), workers=True)
     train_loader = build_video_loader(
         cfg,
         split="train",
@@ -158,6 +220,7 @@ def main(cfg: DictConfig):
 
     encoder = build_model(cfg)
     projector = build_projector(cfg, encoder)
+    disreg = build_disreg(cfg, encoder.embed_dim)
 
     world_size = cfg.trainer.devices * cfg.trainer.num_nodes
     # spt.Module does manual optimization, so Lightning rejects
@@ -167,15 +230,25 @@ def main(cfg: DictConfig):
     # scheduler.interval="step" advances per *optimizer* step, so total_steps must
     # be in optimizer-step units (batches / accum).
     batches_per_epoch = len(train_loader.dataset) // world_size // cfg.loader.batch_size
-    steps_per_epoch = batches_per_epoch // accum
-    total_steps = cfg.trainer.max_epochs * steps_per_epoch
+    steps_per_epoch = max(batches_per_epoch // accum, 1)
+    max_steps = int(cfg.trainer.get("max_steps", -1) or -1)
+    if max_steps > 0:
+        total_steps = max_steps
+    else:
+        total_steps = cfg.trainer.max_epochs * steps_per_epoch
 
-    module = spt.Module(
+    module_kwargs = dict(
         encoder=encoder,
         projector=projector,
+        disreg_enabled=disreg is not None,
         sigreg=SIGReg(**cfg.loss.sigreg.kwargs),
         sigreg_weight=cfg.loss.sigreg.weight,
         forward=multiview_forward,
+    )
+    if disreg is not None:
+        module_kwargs["disreg"] = disreg
+    module = spt.Module(
+        **module_kwargs,
         optim={
             "optimizer": dict(cfg.optimizer),
             "scheduler": {
@@ -190,10 +263,17 @@ def main(cfg: DictConfig):
         hparams=OmegaConf.to_container(cfg, resolve=True),
     )
 
-    logger = None
+    out_dir = HydraConfig.get().runtime.output_dir
+    # stable-pretraining writes checkpoints under {cache_dir}/runs/<date>/<time>/<id>/.
+    spt.set(cache_dir=out_dir)
+    loggers = []
     if cfg.wandb.enabled:
-        logger = WandbLogger(**OmegaConf.to_container(cfg.wandb.config, resolve=True))
-        logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+        wandb_logger = WandbLogger(**OmegaConf.to_container(cfg.wandb.config, resolve=True))
+        wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+        loggers.append(wandb_logger)
+    if cfg.get("csv_log", False):
+        loggers.append(CSVLogger(save_dir=out_dir, name="metrics"))
+    logger = loggers or None
 
     callbacks = []
     if cfg.weight_decay_scheduler.enabled:
@@ -211,9 +291,19 @@ def main(cfg: DictConfig):
         ema_cfg = OmegaConf.to_container(cfg.ema, resolve=True)
         ema_cfg.pop("enabled")
         callbacks.append(WeightEMA(**ema_cfg))
-    callbacks.append(
-        ModelCheckpoint(**OmegaConf.to_container(cfg.checkpoint, resolve=True))
-    )
+    ckpt_cfg = OmegaConf.to_container(cfg.checkpoint, resolve=True)
+    ckpt_cfg["dirpath"] = str(Path(out_dir) / "checkpoints")
+    callbacks.append(ModelCheckpoint(**ckpt_cfg))
+    if cfg.get("csv_log", False):
+        callbacks.append(RunManifest(out_dir))
+    if disreg is not None:
+        print(
+            "[disreg] on "
+            f"gap={disreg.gap} share_encoder={disreg.share_encoder} "
+            f"lambda_disreg={disreg.lambda_disreg} lambda_z={disreg.lambda_z} "
+            f"lambda_pred={disreg.lambda_pred} lambda_sigreg_d={disreg.lambda_sigreg_d}",
+            flush=True,
+        )
     trainer = pl.Trainer(**cfg.trainer, logger=logger, callbacks=callbacks)
     if accum > 1:
         trainer.accumulate_grad_batches_ = accum
