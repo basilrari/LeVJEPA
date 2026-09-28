@@ -151,7 +151,7 @@ bash scripts/probe_imagenet.sh --init --out runs/init/probe.json
 bash scripts/probe_imagenet.sh --ckpt "$(find runs/baseline -name last.ckpt -print -quit)" --out runs/baseline/probe.json
 ```
 
-`CUDA_VISIBLE_DEVICES` defaults to 0. On this machine that is the RTX PRO 5000 Blackwell.
+`CUDA_VISIBLE_DEVICES` defaults to 0. On this machine that is the RTX PRO 5000 Blackwell. A full run (`max_steps` at least 1000) probes ImageNet before `scripts/train_consumer.sh` exits and writes `results/baseline.md` or `results/disreg.md`. The 400-step smoke does not probe.
 
 ## Citation
 
