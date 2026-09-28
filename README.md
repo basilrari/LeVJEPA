@@ -134,6 +134,25 @@ To fine-tune or continue from a checkpoint with a fresh schedule, pass `resume.c
 - [notebooks/feature_visualization.ipynb](notebooks/feature_visualization.ipynb) — load the pretrained checkpoint and visualize its features (patch-token PCA, cosine-similarity heatmaps).
 - [notebooks/training_workshop.ipynb](notebooks/training_workshop.ipynb) — guided workshop: build a tiny LeVJEPA and train it in the notebook on a slice of a Walking Tours video.
 
+## Consumer run and DISReg
+
+One GPU, ViT-Tiny, Walking Tours, batch 128, about 5M clips. This is the setup in the paper's consumer-hardware paragraph, on the repo's 10-video store (the paper used eight videos and did not list which). DISReg is off unless you pass `disreg.enabled=true`. The loss and the ImageNet probe are described in [docs/INTEGRATION.md](docs/INTEGRATION.md).
+
+```bash
+uv sync --extra data
+bash scripts/download_walking_tours.sh
+uv run python scripts/build_lance_walking_tours.py --workers 16
+# paths: copy .env.example to .env
+bash scripts/train_consumer.sh
+bash scripts/train_consumer.sh disreg.enabled=true run_name=disreg
+bash scripts/probe_imagenet.sh --init --out runs/init/probe.json
+# stable-pretraining nests the checkpoint under the Hydra run directory:
+#   runs/<run_name>/<stamp>/runs/<YYYYMMDD>/<HHMMSS>/<id>/checkpoints/last.ckpt
+bash scripts/probe_imagenet.sh --ckpt "$(find runs/baseline -name last.ckpt -print -quit)" --out runs/baseline/probe.json
+```
+
+`CUDA_VISIBLE_DEVICES` defaults to 0. On this machine that is the RTX PRO 5000 Blackwell. A full run (`max_steps` at least 1000) probes ImageNet before `scripts/train_consumer.sh` exits and writes `results/baseline.md` or `results/disreg.md`. The 400-step smoke does not probe.
+
 ## Citation
 
 ```bibtex

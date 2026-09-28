@@ -221,6 +221,7 @@ __marimo__/
 # Hydra / Lightning / wandb run artifacts
 outputs/
 logs/
+runs/
 wandb/
 checkpoints/
 *.ckpt
