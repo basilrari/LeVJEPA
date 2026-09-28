@@ -34,7 +34,7 @@ L_LeVJEPA = L_inv + 0.02 * SIGReg(z_cls)
 With DISReg on, two frames are taken from the global view of the same clip. Default `disreg.gap=clip` uses the first and last frame. `disreg.gap=1` uses the first two clip frames (the loader already sampled them at `frame_stride` 2).
 
 ```
-d_img = o_{t+1} - o_t          # [0, 1] pixels, uint8 / 255
+d_img = o_{t+1} - o_t          # pixel difference, uint8/255, not ImageNet-normalized
 z_t, z_{t+1} = Proj_frame(Enc(o))     # LeVJEPA encoder, one frame at a time, no token drop
 d = Proj_diff(DiffEnc(d_img))         # separate ViT-Tiny image encoder unless disreg.share_encoder=true
 d_hat = DiffPred([z_t, z_{t+1}])
@@ -42,7 +42,7 @@ L_DISReg = 0.5 * MSE(d_hat, d) + 0.25 * SIGReg(z) + 2.0 * SIGReg(d)
 L = L_LeVJEPA + lambda_disreg * L_DISReg
 ```
 
-`lambda_disreg` defaults to 1, so the MotionJEPA coefficients are used as released. Token dropping still applies to the 16-frame global and local views. It is turned off only for the two DISReg frame forwards, then restored. DiffEnc, both new projectors, and DiffPred are training-only. The ImageNet probe loads `encoder.*` from `state_dict_ema` and does not construct them.
+`lambda_disreg` defaults to 1, so the MotionJEPA coefficients are used as released. Frame embeddings are ImageNet-normalized because that is what the LeVJEPA encoder is trained on. DiffEnc is not. MotionJEPA subtracts the stored pixels (pong keeps them in [0, 1] and does not ImageNet-normalize either input) and feeds that difference through DiffEnc unchanged. Normalizing `d_img` would be a different loss. Token dropping still applies to the 16-frame global and local views. It is turned off only for the two DISReg frame forwards, then restored. DiffEnc, both new projectors, and DiffPred are training-only. The ImageNet probe loads `encoder.*` from `state_dict_ema` and does not construct them.
 
 Logged keys when DISReg is on: `inv`, `sigreg_loss` (clip CLS), `disreg_pred`, `sigreg_z`, `sigreg_d`, `disreg`, `loss`. `z_std` and `d_std` are there to see a constant embedding.
 

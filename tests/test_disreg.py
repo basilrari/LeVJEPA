@@ -73,18 +73,67 @@ def _run(share: bool) -> None:
     assert calls["n"] >= 1
     assert encoder.token_drop_rate == 0.95
 
-    calls["n"] = 0
-    handle = target.register_forward_hook(hook)
-    encoder.eval()
-    head.eval()
-    # The train loop only calls training_loss while module.training is true.
-    if encoder.training and head.training:
-        head.training_loss(encoder, sigreg, frames)
-    handle.remove()
-    assert calls["n"] == 0, "DiffEnc ran under eval"
+
+def test_forward_skips_disreg_when_not_training() -> None:
+    """multiview_forward calls DISReg only while the module is training."""
+    from main import multiview_forward
+
+    class Step(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.disreg_enabled = True
+            self.sigreg_weight = 0.02
+
+        def encoder(self, x):
+            return x.new_zeros(x.shape[0], 1, 4)
+
+        def projector(self, x):
+            return x
+
+        def sigreg(self, z):
+            return z.new_zeros(())
+
+        def log_dict(self, *args, **kwargs):
+            return None
+
+    class Head:
+        # Not an nn.Module. Assigning the step to itself makes train() recurse.
+        def __init__(self):
+            self.calls = 0
+
+        def training_loss(self, encoder, sigreg, frames):
+            self.calls += 1
+            zero = frames.new_zeros(())
+            parts = {
+                key: zero
+                for key in (
+                    "disreg_pred",
+                    "sigreg_z",
+                    "sigreg_d",
+                    "disreg",
+                    "z_std",
+                    "d_std",
+                )
+            }
+            return zero, parts
+
+    step = Step()
+    head = Head()
+    step.disreg = head
+    batch = {
+        "global_frame": torch.zeros(2, 2, 3, 8, 8),
+        "local_frames": torch.zeros(2, 1, 2, 3, 8, 8),
+    }
+    step.eval()
+    multiview_forward(step, batch, "fit")
+    assert head.calls == 0, "DISReg ran while the module was in eval"
+    step.train()
+    multiview_forward(step, batch, "fit")
+    assert head.calls == 1, "DISReg did not run while the module was training"
 
 
 if __name__ == "__main__":
+    test_forward_skips_disreg_when_not_training()
     _run(share=False)
     _run(share=True)
     print("test_disreg ok")
