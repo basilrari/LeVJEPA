@@ -4,13 +4,11 @@ Frozen ImageNet attentive probe. Same probe for init, baseline, and DISReg. Enco
 
 | run | ImageNet top-1 | train hours | GPU | peak VRAM MiB | batch | steps |
 | --- | ---: | ---: | --- | ---: | ---: | ---: |
-| init | not run | n/a | n/a | n/a | n/a | 0 |
+| init | 11.10 | n/a | NVIDIA RTX PRO 5000 Blackwell | 1399.0 | n/a | 0 |
 | baseline | 31.05 | 32.22 | NVIDIA RTX PRO 5000 Blackwell | 12612.1 | 128 | 39063 |
 | +DISReg | 29.45 | 32.02 | NVIDIA RTX PRO 5000 Blackwell | 19810.6 | 128 | 39063 |
 
 The paper's consumer ViT-Tiny run is 8.9% at init and 25.2% after pretraining on eight Walking Tours videos. This table is the 10-video store (776,576 frames) and does not claim 25.2%.
-
-The init row is empty because `results/init_probe.json` was not written yet. That probe was still running when this file was committed.
 
 
 Rerun probes:
