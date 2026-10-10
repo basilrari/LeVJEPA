@@ -1,0 +1,98 @@
+{
+  "val_top1_last": 31.046,
+  "val_top1_best": 31.054,
+  "history": [
+    {
+      "epoch": 0,
+      "val_top1": 19.794
+    },
+    {
+      "epoch": 1,
+      "val_top1": 22.814
+    },
+    {
+      "epoch": 2,
+      "val_top1": 24.346
+    },
+    {
+      "epoch": 3,
+      "val_top1": 25.778
+    },
+    {
+      "epoch": 4,
+      "val_top1": 26.662
+    },
+    {
+      "epoch": 5,
+      "val_top1": 27.312
+    },
+    {
+      "epoch": 6,
+      "val_top1": 27.846
+    },
+    {
+      "epoch": 7,
+      "val_top1": 28.238
+    },
+    {
+      "epoch": 8,
+      "val_top1": 29.0
+    },
+    {
+      "epoch": 9,
+      "val_top1": 29.126
+    },
+    {
+      "epoch": 10,
+      "val_top1": 29.462
+    },
+    {
+      "epoch": 11,
+      "val_top1": 29.986
+    },
+    {
+      "epoch": 12,
+      "val_top1": 30.144
+    },
+    {
+      "epoch": 13,
+      "val_top1": 30.456
+    },
+    {
+      "epoch": 14,
+      "val_top1": 30.594
+    },
+    {
+      "epoch": 15,
+      "val_top1": 30.818
+    },
+    {
+      "epoch": 16,
+      "val_top1": 30.826
+    },
+    {
+      "epoch": 17,
+      "val_top1": 30.996
+    },
+    {
+      "epoch": 18,
+      "val_top1": 31.054
+    },
+    {
+      "epoch": 19,
+      "val_top1": 31.046
+    }
+  ],
+  "weight_source": "state_dict_ema",
+  "ckpt": "/mnt/8tb_hdd2/basilrari/LeVJEPA/runs/baseline/2026-09-27_17-59-50/runs/20260927/175950/38a3e7d11fc1/checkpoints/last.ckpt",
+  "model": "vit_tiny",
+  "num_frames": 8,
+  "epochs": 20,
+  "batch_size": 64,
+  "accum": 16,
+  "effective_batch": 1024,
+  "limit": 0,
+  "hours": 75.17,
+  "gpu": "NVIDIA RTX PRO 5000 Blackwell",
+  "peak_vram_mib": 1399.0
+}
