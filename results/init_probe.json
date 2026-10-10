@@ -1,0 +1,98 @@
+{
+  "val_top1_last": 11.082,
+  "val_top1_best": 11.102,
+  "history": [
+    {
+      "epoch": 0,
+      "val_top1": 5.762
+    },
+    {
+      "epoch": 1,
+      "val_top1": 7.09
+    },
+    {
+      "epoch": 2,
+      "val_top1": 7.732
+    },
+    {
+      "epoch": 3,
+      "val_top1": 8.232
+    },
+    {
+      "epoch": 4,
+      "val_top1": 8.658
+    },
+    {
+      "epoch": 5,
+      "val_top1": 8.99
+    },
+    {
+      "epoch": 6,
+      "val_top1": 9.254
+    },
+    {
+      "epoch": 7,
+      "val_top1": 9.42
+    },
+    {
+      "epoch": 8,
+      "val_top1": 9.82
+    },
+    {
+      "epoch": 9,
+      "val_top1": 9.972
+    },
+    {
+      "epoch": 10,
+      "val_top1": 10.212
+    },
+    {
+      "epoch": 11,
+      "val_top1": 10.238
+    },
+    {
+      "epoch": 12,
+      "val_top1": 10.48
+    },
+    {
+      "epoch": 13,
+      "val_top1": 10.626
+    },
+    {
+      "epoch": 14,
+      "val_top1": 10.756
+    },
+    {
+      "epoch": 15,
+      "val_top1": 10.894
+    },
+    {
+      "epoch": 16,
+      "val_top1": 11.056
+    },
+    {
+      "epoch": 17,
+      "val_top1": 11.102
+    },
+    {
+      "epoch": 18,
+      "val_top1": 11.032
+    },
+    {
+      "epoch": 19,
+      "val_top1": 11.082
+    }
+  ],
+  "weight_source": "init",
+  "ckpt": null,
+  "model": "vit_tiny",
+  "num_frames": 8,
+  "epochs": 20,
+  "batch_size": 64,
+  "accum": 16,
+  "effective_batch": 1024,
+  "limit": 0,
+  "hours": 83.068,
+  "gpu": "NVIDIA RTX PRO 5000 Blackwell",
+  "peak_vram_mib": 1399.0
+}
